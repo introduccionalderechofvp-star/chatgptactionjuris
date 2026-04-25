@@ -1,0 +1,192 @@
+openapi: 3.1.0
+info:
+  title: Buscador de Jurisprudencia Colombiana
+  description: |
+    Búsqueda híbrida (vectorial semántica + léxica) sobre jurisprudencia
+    colombiana y doctrina jurídica indexada en una base vectorial Qdrant.
+    Permite también obtener el texto OCR completo de una sentencia ya
+    identificada por un resultado de búsqueda.
+  version: 1.0.0
+servers:
+  - url: https://REEMPLAZAR-CON-DOMINIO-PUBLICO.ejemplo
+    description: Proxy del Action (debe ser HTTPS público)
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    Organo:
+      type: string
+      description: |
+        Fuente jurídica. Si se omite, busca en todas. Lista cerrada — si tu
+        consulta es general, no envíes este campo.
+      enum:
+        - "Sala Civil - Corte Suprema de Justicia"
+        - "Sala Laboral - Corte Suprema de Justicia"
+        - "Sala Penal - Corte Suprema de Justicia"
+        - "Sala Tutelas - Corte Suprema de Justicia"
+        - "Sala Civil - Tribunal Superior de Medellín"
+        - "Sala Laboral - Tribunal Superior de Medellín"
+        - "Sala Penal - Tribunal Superior de Medellín"
+        - "Doctrina"
+    SearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          description: |
+            Consulta jurídica en lenguaje natural. Puede ser una pregunta, un
+            concepto o palabras clave. Ejemplos: "responsabilidad civil médica
+            en partos", "requisitos del mandamiento ejecutivo de obligación de
+            dar inmueble", "nulidad por error en el consentimiento".
+        organo:
+          $ref: '#/components/schemas/Organo'
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 25
+          default: 10
+          description: Cantidad máxima de fragmentos a devolver.
+    SearchResult:
+      type: object
+      properties:
+        rank:
+          type: integer
+        filename:
+          type: string
+        organo:
+          type: string
+        file_path:
+          type: string
+          description: Ruta relativa del PDF; usar tal cual en /document.
+        score:
+          type: number
+          nullable: true
+        text_excerpt:
+          type: string
+          description: Fragmento del documento (truncado a ~1200 chars).
+    SearchResponse:
+      type: object
+      properties:
+        query:
+          type: string
+        organo_filter:
+          type: string
+          nullable: true
+        total_results:
+          type: integer
+        note:
+          type: string
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+    DocumentResponse:
+      type: object
+      properties:
+        filename:
+          type: string
+        file_path:
+          type: string
+        organo:
+          type: string
+          nullable: true
+        num_pages:
+          type: integer
+        num_chars:
+          type: integer
+        full_text:
+          type: string
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+security:
+  - bearerAuth: []
+paths:
+  /search:
+    post:
+      operationId: buscarSentencias
+      summary: Busca jurisprudencia y doctrina por consulta en lenguaje natural.
+      description: |
+        Devuelve fragmentos relevantes (ranked) de la base de conocimiento
+        jurídico. Cada resultado incluye un text_excerpt truncado y un
+        file_path con el cual se puede pedir el texto completo a /document.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Resultados de la búsqueda.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          description: Petición inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Token inválido o ausente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: Error contactando al buscador upstream.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /document:
+    get:
+      operationId: obtenerTextoCompleto
+      summary: Devuelve el texto OCR completo de una sentencia.
+      description: |
+        Pensado para leer una sentencia entera DESPUÉS de haberla identificado
+        con /search. Las sentencias largas pueden tener decenas de miles de
+        tokens; usar selectivamente sobre los documentos más relevantes, no
+        sobre toda la lista de resultados.
+      parameters:
+        - in: query
+          name: file_path
+          required: true
+          schema:
+            type: string
+          description: |
+            Ruta relativa del archivo, tal como aparece en el campo file_path
+            de un resultado de /search. Ejemplo: "Sala Civil - Corte Suprema
+            de Justicia/SC10189-2016 [2007-00105-01].pdf".
+      responses:
+        '200':
+          description: Texto OCR del documento.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResponse'
+        '400':
+          description: Petición inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Token inválido o ausente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: Error contactando al buscador upstream.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'

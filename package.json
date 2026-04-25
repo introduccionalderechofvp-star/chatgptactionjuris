@@ -1,0 +1,17 @@
+{
+  "name": "chatgptactionjuris",
+  "version": "0.1.0",
+  "description": "Proxy + OpenAPI schema para exponer el buscador de jurisprudencia como un Action de un Custom GPT.",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2"
+  }
+}
