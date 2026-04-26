@@ -21,6 +21,14 @@ const MAX_LIMIT = 25;
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} → ${res.statusCode} (${Date.now() - start}ms)`);
+  });
+  next();
+});
+
 function requireAuth(req, res, next) {
   const auth = req.headers.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
@@ -31,16 +39,28 @@ function requireAuth(req, res, next) {
 }
 
 async function callUpstream(url, options = {}) {
-  const r = await fetch(url, options);
+  const start = Date.now();
+  console.log(`  → upstream ${options.method || 'GET'} ${url}`);
+  let r;
+  try {
+    r = await fetch(url, options);
+  } catch (e) {
+    console.error(`  ✗ upstream error tras ${Date.now() - start}ms: ${e.message}`);
+    throw Object.assign(new Error(`Upstream inalcanzable: ${e.message}`), { status: 502 });
+  }
+  const elapsed = Date.now() - start;
   const ct = r.headers.get('content-type') || '';
   if (!ct.includes('application/json')) {
     const body = await r.text();
+    console.error(`  ✗ upstream non-JSON HTTP ${r.status} tras ${elapsed}ms`);
     throw Object.assign(new Error(`Respuesta no-JSON (HTTP ${r.status}): ${body.slice(0, 200)}`), { status: 502 });
   }
   const data = await r.json();
   if (!r.ok || data.error) {
+    console.error(`  ✗ upstream HTTP ${r.status} tras ${elapsed}ms: ${data.error || ''}`);
     throw Object.assign(new Error(data.error || `Upstream HTTP ${r.status}`), { status: r.status || 502 });
   }
+  console.log(`  ✓ upstream HTTP ${r.status} tras ${elapsed}ms`);
   return data;
 }
 
