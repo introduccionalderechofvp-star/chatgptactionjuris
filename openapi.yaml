@@ -8,8 +8,8 @@ info:
     identificada por un resultado de búsqueda.
   version: 1.0.0
 servers:
-  - url: https://REEMPLAZAR-CON-DOMINIO-PUBLICO.ejemplo
-    description: Proxy del Action (debe ser HTTPS público)
+  - url: https://chatgptactionjuris.onrender.com
+    description: Proxy del Action desplegado en Render
 components:
   securitySchemes:
     bearerAuth:
