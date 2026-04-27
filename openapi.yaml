@@ -4,9 +4,9 @@ info:
   description: |
     Búsqueda híbrida (vectorial semántica + léxica) sobre jurisprudencia
     colombiana y doctrina jurídica indexada en una base vectorial Qdrant.
-    Permite también obtener el texto OCR completo de una sentencia ya
-    identificada por un resultado de búsqueda.
-  version: 1.0.0
+    Permite también obtener el texto OCR completo (paginado) de una sentencia
+    ya identificada por un resultado de búsqueda.
+  version: 1.1.0
 servers:
   - url: https://chatgptactionjuris.onrender.com
     description: Proxy del Action desplegado en Render
@@ -30,25 +30,6 @@ components:
         - "Sala Laboral - Tribunal Superior de Medellín"
         - "Sala Penal - Tribunal Superior de Medellín"
         - "Doctrina"
-    SearchRequest:
-      type: object
-      required: [query]
-      properties:
-        query:
-          type: string
-          description: |
-            Consulta jurídica en lenguaje natural. Puede ser una pregunta, un
-            concepto o palabras clave. Ejemplos: "responsabilidad civil médica
-            en partos", "requisitos del mandamiento ejecutivo de obligación de
-            dar inmueble", "nulidad por error en el consentimiento".
-        organo:
-          $ref: '#/components/schemas/Organo'
-        limit:
-          type: integer
-          minimum: 1
-          maximum: 25
-          default: 10
-          description: Cantidad máxima de fragmentos a devolver.
     SearchResult:
       type: object
       properties:
@@ -60,13 +41,11 @@ components:
           type: string
         file_path:
           type: string
-          description: Ruta relativa del PDF; usar tal cual en /document.
         score:
           type: number
           nullable: true
         text_excerpt:
           type: string
-          description: Fragmento del documento (truncado a ~1200 chars).
     SearchResponse:
       type: object
       properties:
@@ -95,10 +74,25 @@ components:
           nullable: true
         num_pages:
           type: integer
-        num_chars:
+        total_chars:
           type: integer
-        full_text:
+          description: Cantidad total de caracteres del documento.
+        offset:
+          type: integer
+          description: Offset desde el que se leyó.
+        returned_chars:
+          type: integer
+          description: Cantidad de caracteres devueltos en este request.
+        has_more:
+          type: boolean
+          description: True si quedan más caracteres por leer.
+        next_offset:
+          type: integer
+          nullable: true
+          description: Offset para pedir el siguiente trozo. null si no quedan más.
+        text:
           type: string
+          description: Trozo del texto OCR del documento.
     Error:
       type: object
       properties:
@@ -108,19 +102,37 @@ security:
   - bearerAuth: []
 paths:
   /search:
-    post:
+    get:
       operationId: buscarSentencias
       summary: Busca jurisprudencia y doctrina por consulta en lenguaje natural.
       description: |
         Devuelve fragmentos relevantes (ranked) de la base de conocimiento
         jurídico. Cada resultado incluye un text_excerpt truncado y un
         file_path con el cual se puede pedir el texto completo a /document.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SearchRequest'
+      x-openai-isConsequential: false
+      parameters:
+        - in: query
+          name: query
+          required: true
+          schema:
+            type: string
+          description: |
+            Consulta jurídica en lenguaje natural. Puede ser una pregunta, un
+            concepto o palabras clave.
+        - in: query
+          name: organo
+          required: false
+          schema:
+            $ref: '#/components/schemas/Organo'
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 25
+            default: 10
+          description: Cantidad máxima de fragmentos a devolver.
       responses:
         '200':
           description: Resultados de la búsqueda.
@@ -149,12 +161,12 @@ paths:
   /document:
     get:
       operationId: obtenerTextoCompleto
-      summary: Devuelve el texto OCR completo de una sentencia.
+      summary: Devuelve el texto OCR de una sentencia, paginado por caracteres.
       description: |
-        Pensado para leer una sentencia entera DESPUÉS de haberla identificado
-        con /search. Las sentencias largas pueden tener decenas de miles de
-        tokens; usar selectivamente sobre los documentos más relevantes, no
-        sobre toda la lista de resultados.
+        Devuelve un trozo del texto OCR de una sentencia. El texto puede ser
+        muy largo; usar offset y max_chars para paginar. Si has_more es true,
+        llamar de nuevo con offset = next_offset para seguir leyendo.
+      x-openai-isConsequential: false
       parameters:
         - in: query
           name: file_path
@@ -162,12 +174,28 @@ paths:
           schema:
             type: string
           description: |
-            Ruta relativa del archivo, tal como aparece en el campo file_path
-            de un resultado de /search. Ejemplo: "Sala Civil - Corte Suprema
-            de Justicia/SC10189-2016 [2007-00105-01].pdf".
+            Ruta relativa del archivo, tal como aparece en file_path de un
+            resultado de /search.
+        - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Offset (en caracteres) desde el que empezar a leer.
+        - in: query
+          name: max_chars
+          required: false
+          schema:
+            type: integer
+            minimum: 1000
+            maximum: 80000
+            default: 60000
+          description: Máximo de caracteres a devolver en este request.
       responses:
         '200':
-          description: Texto OCR del documento.
+          description: Trozo del texto del documento.
           content:
             application/json:
               schema:

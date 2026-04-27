@@ -17,6 +17,8 @@ if (!ACTION_API_KEY) {
 const UPSTREAM = BUSCADOR_API_URL.replace(/\/+$/, '');
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 25;
+const DEFAULT_MAX_CHARS = 60000;
+const MAX_MAX_CHARS = 80000;
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -66,12 +68,13 @@ async function callUpstream(url, options = {}) {
 
 app.get('/health', (_req, res) => res.json({ ok: true, upstream: UPSTREAM }));
 
-app.post('/search', requireAuth, async (req, res) => {
-  const { query, organo, limit } = req.body || {};
-  if (!query || typeof query !== 'string' || !query.trim()) {
+app.get('/search', requireAuth, async (req, res) => {
+  const query = (req.query.query || '').toString().trim();
+  const organo = (req.query.organo || '').toString().trim();
+  if (!query) {
     return res.status(400).json({ error: 'Falta el parámetro "query".' });
   }
-  const cappedLimit = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+  const cappedLimit = Math.min(Math.max(Number(req.query.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
 
   try {
     const data = await callUpstream(`${UPSTREAM}/api/search`, {
@@ -109,6 +112,8 @@ app.post('/search', requireAuth, async (req, res) => {
 
 app.get('/document', requireAuth, async (req, res) => {
   const filePath = (req.query.file_path || '').toString().trim();
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+  const maxChars = Math.min(Math.max(Number(req.query.max_chars) || DEFAULT_MAX_CHARS, 1000), MAX_MAX_CHARS);
   if (!filePath) {
     return res.status(400).json({ error: 'Falta el parámetro "file_path".' });
   }
@@ -116,13 +121,22 @@ app.get('/document', requireAuth, async (req, res) => {
     const data = await callUpstream(
       `${UPSTREAM}/api/document/text?path=${encodeURIComponent(filePath)}`
     );
+    const fullText = data.full_text || '';
+    const totalChars = fullText.length;
+    const slice = fullText.slice(offset, offset + maxChars);
+    const nextOffset = offset + slice.length;
+    const hasMore = nextOffset < totalChars;
     res.json({
       filename: data.filename,
       file_path: data.file_path,
       organo: data.organo,
       num_pages: data.num_pages,
-      num_chars: data.num_chars,
-      full_text: data.full_text,
+      total_chars: totalChars,
+      offset,
+      returned_chars: slice.length,
+      has_more: hasMore,
+      next_offset: hasMore ? nextOffset : null,
+      text: slice,
     });
   } catch (e) {
     res.status(e.status || 502).json({ error: e.message });
