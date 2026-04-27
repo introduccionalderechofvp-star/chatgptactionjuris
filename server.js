@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import { Readable } from 'stream';
 
 const BUSCADOR_API_URL = process.env.BUSCADOR_API_URL;
 const ACTION_API_KEY = process.env.ACTION_API_KEY;
@@ -21,7 +22,18 @@ const DEFAULT_MAX_CHARS = 60000;
 const MAX_MAX_CHARS = 80000;
 
 const app = express();
+app.set('trust proxy', true);
 app.use(express.json({ limit: '1mb' }));
+
+function publicBaseUrl(req) {
+  const proto = req.get('x-forwarded-proto') || req.protocol;
+  const host = req.get('host');
+  return `${proto}://${host}`;
+}
+
+function buildDownloadUrl(req, filePath) {
+  return `${publicBaseUrl(req)}/download?file_path=${encodeURIComponent(filePath)}&t=${ACTION_API_KEY}`;
+}
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -96,6 +108,7 @@ app.get('/search', requireAuth, async (req, res) => {
       file_path: r.file_path,
       score: typeof r.score === 'number' ? Number(r.score.toFixed(4)) : null,
       text_excerpt: r.text || '',
+      download_url: r.file_path ? buildDownloadUrl(req, r.file_path) : null,
     }));
 
     res.json({
@@ -140,6 +153,34 @@ app.get('/document', requireAuth, async (req, res) => {
     });
   } catch (e) {
     res.status(e.status || 502).json({ error: e.message });
+  }
+});
+
+app.get('/download', async (req, res) => {
+  const filePath = (req.query.file_path || '').toString().trim();
+  const token = (req.query.t || '').toString();
+  if (token !== ACTION_API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  if (!filePath) {
+    return res.status(400).json({ error: 'Falta el parámetro "file_path".' });
+  }
+  const upstreamUrl = `${UPSTREAM}/api/download?path=${encodeURIComponent(filePath)}`;
+  try {
+    const r = await fetch(upstreamUrl);
+    if (!r.ok) {
+      const body = await r.text();
+      return res.status(r.status).json({ error: `Upstream HTTP ${r.status}: ${body.slice(0, 200)}` });
+    }
+    const ct = r.headers.get('content-type');
+    const cd = r.headers.get('content-disposition');
+    const cl = r.headers.get('content-length');
+    if (ct) res.setHeader('Content-Type', ct);
+    if (cd) res.setHeader('Content-Disposition', cd);
+    if (cl) res.setHeader('Content-Length', cl);
+    Readable.fromWeb(r.body).pipe(res);
+  } catch (e) {
+    res.status(502).json({ error: `Upstream inalcanzable: ${e.message}` });
   }
 });
 

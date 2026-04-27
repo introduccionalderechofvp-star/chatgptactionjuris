@@ -46,6 +46,13 @@ components:
           nullable: true
         text_excerpt:
           type: string
+        download_url:
+          type: string
+          nullable: true
+          description: |
+            URL pública para descargar el PDF original de la sentencia.
+            Incluí este link al usuario como markdown clickeable cuando cites
+            el documento.
     SearchResponse:
       type: object
       properties:
